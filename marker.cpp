@@ -1,5 +1,6 @@
-﻿#include <GL/glut.h>  
+﻿
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/aruco.hpp>
 #include <iostream>
 
@@ -9,7 +10,7 @@ using namespace cv;
 namespace {
 	const char* about = "Basic marker detection";
 	const char* keys =
-		"{d        | 8     | dictionary: DICT_4X4_50=0, DICT_4X4_100=1, DICT_4X4_250=2,"
+		"{d        |  8     | dictionary: DICT_4X4_50=0, DICT_4X4_100=1, DICT_4X4_250=2,"
 		"DICT_4X4_1000=3, DICT_5X5_50=4, DICT_5X5_100=5, DICT_5X5_250=6, DICT_5X5_1000=7, "
 		"DICT_6X6_50=8, DICT_6X6_100=9, DICT_6X6_250=10, DICT_6X6_1000=11, DICT_7X7_50=12,"
 		"DICT_7X7_100=13, DICT_7X7_250=14, DICT_7X7_1000=15, DICT_ARUCO_ORIGINAL = 16}"
@@ -61,6 +62,44 @@ static bool readDetectorParameters(string filename, Ptr<aruco::DetectorParameter
 	fs["minOtsuStdDev"] >> params->minOtsuStdDev;
 	fs["errorCorrectionRate"] >> params->errorCorrectionRate;
 	return true;
+}
+
+Mat drawWorldImg(bool flag, int i, vector< vector< Point2f > > corners, Mat image) {
+	Mat src;
+	src = cv::imread("zhaohuan.jpg",1);
+	if (src.empty()) {
+		cout << "图像加载失败！" << endl;
+		return image;
+	}
+	cv::Point2f srcQuad[] = {
+		cv::Point2f(0,0),
+		cv::Point2f(src.cols - 1,0),
+		cv::Point2f(src.cols - 1,src.rows - 1),
+		cv::Point2f(0,src.rows - 1)
+	};
+
+	cv::Point2f dstQuad[] = {
+		cv::Point2f(corners[i][0].x,corners[i][0].y),
+		cv::Point2f(corners[i][1].x,corners[i][1].y),
+		cv::Point2f(corners[i][2].x,corners[i][2].y),
+		cv::Point2f(corners[i][3].x,corners[i][3].y)
+	};
+
+	cv::Mat warp_mat = cv::getPerspectiveTransform(srcQuad, dstQuad);
+	Mat dst;
+	//cv::Mat dst(image.rows, image.cols, CV_8UC3, Scalar(0, 0, 0));;
+	cv::warpPerspective(src, dst, warp_mat, src.size(), cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar());
+	
+	Rect ROI_orect = boundingRect(corners[i]);
+	dst(ROI_orect).copyTo(image(ROI_orect));
+	//for (int i = 0; i < 4; i++)
+		//cv::circle(dst, dstQuad[i], 5, cv::Scalar(255, 0, 255), -1, cv::LINE_AA);
+	
+	//imshow("Perspective_Warp", image);
+	//cv::waitKey();
+
+	return image;
+
 }
 
 
@@ -134,7 +173,7 @@ int main(int argc, char *argv[]) {
 	int totalIterations = 0;
 
 	while (inputVideo.grab()) {
-		Mat image, imageCopy;
+		Mat image, imageCopy, imageMask;
 		inputVideo.retrieve(image);
 
 		double tick = (double)getTickCount();
@@ -145,9 +184,13 @@ int main(int argc, char *argv[]) {
 
 		// detect markers and estimate pose
 		aruco::detectMarkers(image, dictionary, corners, ids, detectorParams, rejected);
+		//corners	检测到的标记角落的矢量。对于每个标记，提供了它的四个角（例如，std :: vector <std :: vector <cv :: Point2f>>）。
+		//				对于N个检测到的标记，此数组的维数为N×4。角的顺序是顺时针的。
 		if (estimatePose && ids.size() > 0)
 			aruco::estimatePoseSingleMarkers(corners, markerLength, camMatrix, distCoeffs, rvecs,
-				tvecs);
+				tvecs);//rvecs旋转矩阵；tvecs平移向量
+
+
 
 		double currentTime = ((double)getTickCount() - tick) / getTickFrequency();
 		totalTime += currentTime;
@@ -158,16 +201,28 @@ int main(int argc, char *argv[]) {
 		}
 
 		// draw results
-		image.copyTo(imageCopy);
+		//Mat imageMask;
+		Mat mask(image.rows, image.cols, CV_8UC3, Scalar(0, 0, 0));
+		image.copyTo(imageCopy); 
+		image.copyTo(imageMask);
+
 		if (ids.size() > 0) {
 			aruco::drawDetectedMarkers(imageCopy, corners, ids);
 
 			if (estimatePose) {
-				for (unsigned int i = 0; i < ids.size(); i++)
+				for (unsigned int i = 0; i < ids.size(); i++) {
+
+					mask = drawWorldImg(estimatePose, i, corners,mask);
 					aruco::drawAxis(imageCopy, camMatrix, distCoeffs, rvecs[i], tvecs[i],
 						markerLength * 0.5f);
+				}
+				imageCopy = mask + imageCopy;
+				//imshow("mask", mask);
+				
 			}
 		}
+
+		
 
 		if (showRejected && rejected.size() > 0)
 			aruco::drawDetectedMarkers(imageCopy, rejected, noArray(), Scalar(100, 0, 255));
@@ -179,3 +234,4 @@ int main(int argc, char *argv[]) {
 
 	return 0;
 }
+
